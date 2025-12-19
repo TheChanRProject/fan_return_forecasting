@@ -1,24 +1,24 @@
 #!/bin/bash
 
-# Check if advisor binary exists
-if ! command -v advisor &> /dev/null
+# Check if adviser binary exists
+if ! command -v adviser &> /dev/null
 then
-    echo "advisor binary could not be found. Please ensure it is in your PATH or current directory."
+    echo "adviser binary could not be found. Please ensure it is in your PATH or current directory."
     echo "Checking local directory..."
-    if [ -f "./advisor" ]; then
-        ADVISOR="./advisor"
+    if [ -f "./adviser" ]; then
+        adviser="./adviser"
     else
-        echo "Please locate the advisor binary and update this script or add it to PATH."
+        echo "Please locate the adviser binary and update this script or add it to PATH."
         exit 1
     fi
 else
-    ADVISOR="advisor"
+    adviser="adviser"
 fi
 
 # Submit job
-# Assuming CLI syntax: advisor job submit --name <name> --command <cmd>
-echo "Submitting job to Advisor..."
-$ADVISOR job submit \
+# Assuming CLI syntax: adviser job submit --name <name> --command <cmd>
+echo "Submitting job to adviser..."
+$adviser job submit \
     --name "fan-stock-forecast" \
     --image "pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime" \
     --command "pip install -r requirements.txt && python train.py" \
