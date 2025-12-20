@@ -12,66 +12,70 @@ class StockDataset(Dataset):
         
         # Load data from DuckDB
         con = duckdb.connect(db_path, read_only=True)
-        # Simple split logic: 80% train, 10% val, 10% test
-        # In really, we should split by date.
-        # Let's just load everything and split in memory for simplicity/speed with this small data.
         
-        # We need sequences of (seq_len) -> target
-        # Let's load ticker, date, close, target_close, target_roi
-        # We need to normalize data per ticker or globally.
-        # For simplicity, let's just return raw values and handle normalization here or in model.
-        # Ideally, input should be Returns, not Prices, for stationarity.
-        # But user asked for Price forecasting too.
-        # Let's stick to the plan: Input = Close prices (normalized?)
-        
-        # For this prototype:
-        # Load all data, group by ticker.
-        df = con.execute("SELECT ticker, close, target_close, target_roi FROM price_data ORDER BY ticker, date").fetchdf()
+        # Load all features
+        # Features: close, daily_return, log_return, sma_10, sma_30, sma_50, volatility_20d, rsi_14
+        query = """
+        SELECT 
+            ticker, 
+            close, daily_return, log_return, 
+            sma_10, sma_30, sma_50, 
+            volatility_20d, rsi_14,
+            target_close, target_roi 
+        FROM price_data 
+        ORDER BY ticker, date
+        """
+        df = con.execute(query).fetchdf()
         con.close()
         
         self.samples = []
         
+        # Pre-convert to numpy for speed
+        # Groups: (ticker, dataframe)
         for ticker, group in df.groupby("ticker"):
-            # Create sliding windows
-            values = group["close"].values
-            targets_price = group["target_close"].values
-            targets_roi = group["target_roi"].values
+            # Extract feature arrays
+            # Shape: (N, 8)
+            # 0:close, 1:daily_ret, 2:log_ret, 3:sma10, 4:sma30, 5:sma50, 6:vol, 7:rsi
+            feature_cols = ["close", "daily_return", "log_return", "sma_10", "sma_30", "sma_50", "volatility_20d", "rsi_14"]
+            data_arr = group[feature_cols].values.astype(np.float32)
             
-            if len(values) <= seq_len:
+            targets_price = group["target_close"].values.astype(np.float32)
+            targets_roi = group["target_roi"].values.astype(np.float32)
+            
+            n_rows = len(data_arr)
+            if n_rows <= seq_len:
                 continue
                 
             # Create indices
-            # We can use numpy sliding_window_view but let's be explicit
-            for i in range(len(values) - seq_len):
-                seq = values[i : i + seq_len]
-                # Target is specific to the last step of the sequence?
-                # The ETL prepared target_close/roi aligned with the row.
-                # So if we take row[i+seq_len-1], it has the target for 30 days ahead.
+            for i in range(n_rows - seq_len):
+                # Input sequence: [i, i+seq_len)
+                seq = data_arr[i : i + seq_len]
                 
-                # Check alignment in ETL: 
-                # df = df.with_columns(pl.col("close").shift(-30).alias("target_close"))
-                # So row `t` has prices at `t` and target at `t+30`.
-                # If input sequence is [t-59 ... t], we want to predict target for t.
-                
-                # So we take the target from the LAST element of the sequence.
+                # Target at step i+seq_len-1 (which corresponds to t+30 horizon)
                 idx_last = i + seq_len - 1
-                
                 tgt_p = targets_price[idx_last]
                 tgt_r = targets_roi[idx_last]
                 
-                # Simple normalization (divide by first element of sequence)
-                norm_factor = seq[0]
-                seq_norm = seq / norm_factor
+                # Normalization
+                # Price-like columns: close(0), sma10(3), sma30(4), sma50(5) -> Divide by seq[0, 0] (Start Close)
+                norm_price = seq[0, 0]
+                if norm_price == 0: norm_price = 1e-8 # Safety
                 
-                # We also need to destandardize the output price if we want real metrics
-                # But for the model regression, better to predict normalized price target?
-                # Target Price is also normalized by the same factor
-                tgt_p_norm = tgt_p / norm_factor
+                seq_norm = seq.copy()
+                seq_norm[:, [0, 3, 4, 5]] /= norm_price
+                
+                # RSI(7) -> / 100.0
+                seq_norm[:, 7] /= 100.0
+                
+                # Others (returns, vol) -> Keep as is
+                
+                # Target Price Normalization
+                tgt_p_norm = tgt_p / norm_price
                 
                 self.samples.append({
-                    "x": seq_norm.astype(np.float32), 
+                    "x": seq_norm, 
                     "y": np.array([tgt_p_norm, tgt_r], dtype=np.float32),
-                    "norm": norm_factor
+                    "norm": norm_price
                 })
                 
         # Split
@@ -88,8 +92,9 @@ class StockDataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.samples[idx]
-        # x shape: (seq_len, 1) if input_dim=1
-        return torch.tensor(item["x"]).unsqueeze(-1), torch.tensor(item["y"])
+        # x shape: (seq_len, num_features) = (seq_len, 8)
+        # Model expects correct input_dim
+        return torch.tensor(item["x"]), torch.tensor(item["y"])
 
 class StockDataModule(pl.LightningDataModule):
     def __init__(self, db_path="stocks.duckdb", batch_size=32, seq_len=60):

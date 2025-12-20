@@ -18,10 +18,11 @@ fi
 # Submit job
 # Assuming CLI syntax: adviser job submit --name <name> --command <cmd>
 echo "Submitting job to adviser..."
-$adviser job submit \
-    --name "fan-stock-forecast" \
-    --image "pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime" \
-    --command "pip install -r requirements.txt && python train.py" \
-    --resources "gpu=1"
+$adviser run \
+    "pip install -r requirements.txt && python train.py" \
+    --cloud "aws" \
+    --container-image-uri "pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime" \
+    --gpu "1"
+    --region 'us-east-1'
 
 echo "Job submitted."

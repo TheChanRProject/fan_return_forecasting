@@ -9,18 +9,18 @@ def train():
     
     # Params
     DB_PATH = "stocks.duckdb"
-    SEQ_LEN = 10 # Short for testing with dummy data
-    BATCH_SIZE = 2
+    SEQ_LEN = 30 
+    BATCH_SIZE = 64 # Increased batch size
     
     dm = StockDataModule(DB_PATH, batch_size=BATCH_SIZE, seq_len=SEQ_LEN)
     
     # Model
-    # Input dim 1 (Close price)
-    model = LitFAN(input_dim=1, d_model=16, forecast_horizon=30, num_layers=1)
+    # Input dim 8: close, daily_ret, log_ret, sma10, sma30, sma50, vol, rsi
+    model = LitFAN(input_dim=8, d_model=32, forecast_horizon=30, num_layers=2)
     
     # Trainer
     trainer = pl.Trainer(
-        max_epochs=2,
+        max_epochs=10,
         accelerator="cpu", # Use "gpu" or "mps" if available
         devices=1,
         default_root_dir="logs",
